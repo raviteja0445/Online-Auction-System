@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Online Auction System</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-image: url('background.jpg'); /* Add your background image */
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+
+    }
+
+    .container {
+      max-width: 400px;
+      padding: 20px;
+      background-color: rgba(255, 255, 255, 0.8); /* Add a semi-transparent white background */
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+
+    label {
+      font-weight: bold;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    button {
+      display: block;
+      width: 100%;
+      margin: 10px 0;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      box-sizing: border-box;
+      font-size: 16px;
+    }
+
+    button {
+      background-color: #007bff;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    #timer {
+      text-align: center;
+      font-size: 20px;
+      font-weight: bold;
+    }
+
+    /* Add the animation */
+    @keyframes winnerAnimation {
+      0% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.1);
+      }
+      100% {
+        transform: scale(1);
+      }
+    }
+
+    /* Apply the animation to the auction-winning message */
+    .winner-message {
+      display: none;
+      animation: winnerAnimation 1s ease-in-out;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Online Auction System</h1>
+    <label for="auctionIdInput">Enter Auction ID:</label>
+    <input type="text" id="auctionIdInput">
+    <button id="setAuctionId">Set Auction ID</button>
+    <p>Current Auction ID: <span id="auctionId">-</span></p>
+    <p>Current Highest Bid: <span id="highestBid">0</span></p>
+    <p>Highest Bidder: <span id="highestBidder">None</span></p>
+    <input type="number" id="bidAmount" placeholder="Your Bid Amount">
+    <button id="submitBid">Submit Bid</button>
+    <button id="startAuction" disabled>Start Auction</button>
+    <p id="timer">Time Left: 30 seconds</p>
+    <!-- Display the auction-winning message -->
+    <p class="winner-message" id="winnerMessage">Congratulations! You have won the auction.</p>
+  </div>
+
+  <!-- Include Socket.IO library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.2/socket.io.js"></script>
+  <script>
+    const socket = io();
+    let auctionId = '-';
+    let highestBidder = null; // Track the highest bidder
+    let auctionEndTime = 0; // Variable to hold the auction end time
+
+    socket.on('auctionStarted', (data, end) => {
+      auctionId = data;
+      document.getElementById('auctionId').innerText = auctionId;
+      document.getElementById('startAuction').disabled = true;
+      auctionEndTime = end; // Assign the end time of the auction
+      synchronizeTimer(auctionEndTime); // Synchronize the timer with the server's end time
+      startCountdown(); // Start the countdown
+    });
+
+    socket.on('timerUpdate', (dataAuctionId, timeRemaining) => {
+      if (dataAuctionId === auctionId) { // Correct comparison
+        auctionEndTime = Date.now() + timeRemaining; // Update the auction end time
+        synchronizeTimer(auctionEndTime); // Synchronize the timer with the updated end time
+      }
+    });
+
+    socket.on('newHighestBid', data => {
+      document.getElementById('highestBid').innerText = data.highestBid;
+      document.getElementById('highestBidder').innerText = data.highestBidder || 'None';
+      highestBidder = data.highestBidder; // Update highest bidder
+    });
+
+    socket.on('auctionEnded', data => {
+      document.getElementById('timer').innerText = 'Auction Ended';
+      // Display congratulations message only to the highest bidder
+      if (highestBidder === socket.id) {
+        document.getElementById('winnerMessage').style.display = 'block';
+      }
+    });
+
+    document.getElementById('setAuctionId').addEventListener('click', () => {
+      const auctionIdInput = document.getElementById('auctionIdInput').value.trim();
+      if (auctionIdInput !== '') {
+        auctionId = auctionIdInput;
+        document.getElementById('auctionId').innerText = auctionId;
+        document.getElementById('startAuction').disabled = false;
+        socket.emit('joinRoom', auctionId); // Join room for this auction
+      }
+    });
+
+    document.getElementById('submitBid').addEventListener('click', () => {
+      const bidAmount = parseInt(document.getElementById('bidAmount').value);
+      if (!isNaN(bidAmount)) {
+        socket.emit('newBid', { auctionId, bid: bidAmount });
+      }
+    });
+
+    document.getElementById('startAuction').addEventListener('click', () => {
+      socket.emit('startAuction', auctionId);
+    });
+
+    function updateTimer(timeRemaining) {
+      const minutes = Math.floor(timeRemaining / 60000);
+      const seconds = Math.floor((timeRemaining % 60000) / 1000);
+      const formattedTime = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+      document.getElementById('timer').innerText = `Time Left: ${formattedTime}`;
+    }
+
+    function startCountdown() {
+      setInterval(() => {
+        const currentTime = Date.now();
+        const timeRemaining = Math.max(0, auctionEndTime - currentTime);
+        updateTimer(timeRemaining);
+      }, 1000);
+    }
+
+    // Function to synchronize the timer with the server's end time
+    function synchronizeTimer(endTime) {
+      const currentTime = Date.now();
+      const timeRemaining = Math.max(0, endTime - currentTime);
+      updateTimer(timeRemaining);
+    }
+  </script>
+</body>
+</html>
